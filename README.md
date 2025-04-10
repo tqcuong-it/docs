@@ -22,34 +22,34 @@ ApiController
 
 ```mermaid
 flowchart TD
-    A[クライアントリクエスト] --> B[ルーター]
-    B --> C[ミドルウェア処理]
-    C --> D[コントローラーメソッド実行]
+    A[Client Request] --> B[Router]
+    B --> C[Middleware Processing]
+    C --> D[Controller Method Execution]
     
-    D --> E{リクエスト検証}
-    E -->|失敗| F[例外発生]
-    F --> G[例外ハンドラー]
-    G --> H[エラーレスポンス生成]
+    D --> E{Request Validation}
+    E -->|Failed| F[Exception Thrown]
+    F --> G[Exception Handler]
+    G --> H[Error Response Generation]
     
-    E -->|成功| I[ページネーションパラメータ処理]
-    I --> J[データアクセス層]
-    J --> K[ビジネスロジック実行]
+    E -->|Success| I[Pagination Parameter Processing]
+    I --> J[Data Access Layer]
+    J --> K[Business Logic Execution]
     
-    K -->|例外発生| R[try-catchブロック]
-    R --> S{例外処理}
+    K -->|Exception Thrown| R[try-catch Block]
+    R --> S{Exception Processing}
     S --> H
     
-    K --> L{処理結果}
-    L -->|成功| M[buildOK レスポンス]
-    L -->|警告| N[buildWarn レスポンス]
-    L -->|エラー| O[buildNG レスポンス]
+    K --> L{Processing Result}
+    L -->|Success| M[buildOK Response]
+    L -->|Warning| N[buildWarn Response]
+    L -->|Error| O[buildNG Response]
     
-    M --> P[JSONレスポンス変換]
+    M --> P[JSON Response Conversion]
     N --> P
     O --> P
     H --> P
     
-    P --> Q[クライアントへ応答]
+    P --> Q[Response to Client]
     
     LOG[Logging]
     
