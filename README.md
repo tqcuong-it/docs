@@ -29,7 +29,6 @@ flowchart TD
     D --> E{リクエスト検証}
     E -->|失敗| F[例外発生]
     F --> G[例外ハンドラー]
-    G -->|ログ記録| LOG[Logging]
     G --> H[エラーレスポンス生成]
     
     E -->|成功| I[ページネーションパラメータ処理]
@@ -38,7 +37,6 @@ flowchart TD
     
     K -->|例外発生| R[try-catchブロック]
     R --> S{例外処理}
-    S -->|ログ記録| LOG
     S --> H
     
     K --> L{処理結果}
@@ -52,6 +50,8 @@ flowchart TD
     H --> P
     
     P --> Q[クライアントへ応答]
+    
+    LOG[Logging]
     
     subgraph "LimitOffsetAware"
     I
