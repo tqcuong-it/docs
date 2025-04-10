@@ -24,7 +24,8 @@ ApiController
 flowchart TD
     A[Client Request] --> B[Router]
     B --> C[Middleware Processing]
-    C --> D[Controller Method Execution]
+    C --> LOG[Logging]
+    LOG --> D[Controller Method Execution]
     
     D --> E{Request Validation}
     E -->|Failed| F[Exception Thrown]
@@ -50,8 +51,6 @@ flowchart TD
     H --> P
     
     P --> Q[Response to Client]
-    
-    LOG[Logging]
     
     subgraph "LimitOffsetAware"
     I
