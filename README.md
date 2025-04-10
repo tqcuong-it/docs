@@ -35,6 +35,16 @@ flowchart TD
     I --> J[データアクセス層]
     J --> K[ビジネスロジック実行]
     
+    K -->|例外発生| R[try-catchブロック]
+    R --> S{例外タイプ判別}
+    S -->|ErrUsr| T[ユーザーエラー処理]
+    S -->|ErrPrg| U[システムエラー処理]
+    S -->|WarnUsr| V[警告処理]
+    
+    T --> H
+    U --> H
+    V --> H
+    
     K --> L{処理結果}
     L -->|成功| M[buildOK レスポンス]
     L -->|警告| N[buildWarn レスポンス]
@@ -54,6 +64,11 @@ flowchart TD
     subgraph "Assertions"
     E
     F
+    R
+    S
+    T
+    U
+    V
     end
     
     subgraph "JsonResponseFactory"
@@ -303,6 +318,58 @@ try {
     return $this->buildWarn($e->getCode(), $e->getMessages(), $data);
 }
 ```
+
+### ビジネスロジックからのエラー処理メカニズム
+
+BaseControllerには、ビジネスロジック実行中に発生する例外を自動的に処理する専用のメカニズムは組み込まれていません。以下に示す方法で例外処理を行う必要があります：
+
+1. **例外処理アプローチ**:
+   - APIコントローラーのアクションメソッド内で、すべてのビジネスロジックをtry-catchブロックで囲む
+   - 各種例外タイプ（ErrUsr、ErrPrg、WarnUsr）を個別に捕捉して処理する
+
+2. **例外タイプ判別メソッド**:
+   BaseController（Assertionsトレイト）には例外のタイプを判別するための以下の便利なメソッドが含まれています：
+   
+   ```php
+   // 例外の種類を判別するヘルパーメソッド
+   public function isWarnException(\Exception $e)      // 警告例外か
+   public function isLogicException(\Exception $e)     // ロジック例外か
+   public function isUserException(\Exception $e)      // ユーザー例外か
+   public function isProgrammerException(\Exception $e) // プログラマー例外か
+   public function isValidationException(\Exception $e) // バリデーション例外か
+   public function isDeadlockExcpetion(\Exception $e)  // デッドロック例外か
+   ```
+
+3. **推奨パターン**:
+   以下のパターンを使用して、コントローラーアクション内のすべてのビジネスロジックをラップすることをお勧めします：
+
+   ```php
+   public function someAction()
+   {
+       try {
+           // ビジネスロジックの実行
+           // ...
+           return $this->buildOK($result);
+       } catch (\Exception $e) {
+           if ($this->isUserException($e)) {
+               return $this->buildNG($e->getCode(), $e->getMessages());
+           } elseif ($this->isProgrammerException($e)) {
+               $this->log(LOG_ERR, $e->getCode(), $e->getMessage());
+               return $this->buildNG('SYS_ERR', ['システムエラーが発生しました']);
+           } elseif ($this->isWarnException($e)) {
+               return $this->buildWarn($e->getCode(), $e->getMessages(), $data);
+           } elseif ($this->isValidationException($e)) {
+               return $this->buildNGValidation($e->validator->errors()->toArray());
+           } else {
+               // 未知の例外
+               $this->log(LOG_CRIT, 'UNKNOWN', $e->getMessage());
+               return $this->buildNG('SYS_ERR', ['予期しないエラーが発生しました']);
+           }
+       }
+   }
+   ```
+
+この方法では、BaseControllerは例外を自動的に処理するメカニズムを提供していませんが、例外を容易に処理するためのツールと方法を提供しています。開発者は上記のパターンを使用して、一貫した方法で例外を処理する必要があります。
 
 ## エラーコード体系
 
