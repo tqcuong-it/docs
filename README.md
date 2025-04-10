@@ -24,61 +24,24 @@ ApiController
 flowchart TD
     A[クライアントリクエスト] --> B[ルーター]
     B --> W[APIログミドルウェア]
-    
-    %% リクエストログ記録
-    W --> W1[リクエスト情報収集]
-    W1 --> W2[センシティブデータのフィルタリング]
-    W2 --> W3[リクエストログ記録]
-    W3 -->|Log.info| Z1[(ログストレージ)]
-    W3 --> C[ミドルウェア処理]
-    
+    W -->|リクエストログ記録| Z1[(ログストレージ)]
+    W --> C[ミドルウェア処理]
     C --> D[コントローラーメソッド実行]
     
     D --> E{リクエスト検証}
     E -->|失敗| F[例外発生]
     F --> G[例外ハンドラー]
-    
-    %% 例外ログ記録
-    G --> G1[例外情報収集]
-    G1 --> G2[コンテキスト情報マージ]
-    G2 --> G3{例外タイプ判別}
-    G3 -->|ErrUsr| G4[INFOレベルでログ記録]
-    G3 -->|ErrPrg| G5[ERRORレベルでログ記録]
-    G3 -->|WarnUsr| G6[WARNINGレベルでログ記録]
-    G3 -->|その他| G7[CRITICALレベルでログ記録]
-    
-    G4 -->|Log.info| Z1
-    G5 -->|Log.error| Z1
-    G6 -->|Log.warning| Z1
-    G7 -->|Log.critical| Z1
-    
-    G4 --> H[エラーレスポンス生成]
-    G5 --> H
-    G6 --> H
-    G7 --> H
+    G -->|例外ログ記録| Z1
+    G --> H[エラーレスポンス生成]
     
     E -->|成功| I[ページネーションパラメータ処理]
     I --> J[データアクセス層]
     J --> K[ビジネスロジック実行]
     
     K -->|例外発生| R[try-catchブロック]
-    R --> S{例外タイプ判別}
-    S -->|ErrUsr| T[ユーザーエラー処理]
-    S -->|ErrPrg| U[システムエラー処理]
-    S -->|WarnUsr| V[警告処理]
-    
-    %% ビジネスロジック例外のログ記録
-    T --> T1[INFOレベルでログ記録]
-    U --> U1[ERRORレベルでログ記録]
-    V --> V1[WARNINGレベルでログ記録]
-    
-    T1 -->|Log.info| Z1
-    U1 -->|Log.error| Z1
-    V1 -->|Log.warning| Z1
-    
-    T1 --> H
-    U1 --> H
-    V1 --> H
+    R --> S{例外処理}
+    S -->|例外ログ記録| Z1
+    S --> H
     
     K --> L{処理結果}
     L -->|成功| M[buildOK レスポンス]
@@ -91,14 +54,8 @@ flowchart TD
     H --> P
     
     P --> X[APIログミドルウェア]
-    
-    %% レスポンスログ記録
-    X --> X1[処理時間計測]
-    X1 --> X2[レスポンス情報収集]
-    X2 --> X3[センシティブデータのフィルタリング]
-    X3 --> X4[レスポンスログ記録]
-    X4 -->|Log.info| Z1
-    X4 --> Q[クライアントへ応答]
+    X -->|レスポンスログ記録| Z1
+    X --> Q[クライアントへ応答]
     
     subgraph "LimitOffsetAware"
     I
@@ -110,31 +67,14 @@ flowchart TD
     end
     
     subgraph "ExceptionHandler"
-    G1
-    G2
-    G3
-    G4
-    G5
-    G6
-    G7
+    G
     R
     S
-    T
-    U
-    V
-    T1
-    U1
-    V1
     end
     
     subgraph "APIログミドルウェア"
-    W1
-    W2
-    W3
-    X1
-    X2
-    X3
-    X4
+    W
+    X
     end
     
     subgraph "JsonResponseFactory"
