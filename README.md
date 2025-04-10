@@ -23,7 +23,8 @@ ApiController
 ```mermaid
 flowchart TD
     A[クライアントリクエスト] --> B[ルーター]
-    B --> C[ミドルウェア処理]
+    B --> W[APIログミドルウェア]
+    W --> C[ミドルウェア処理]
     C --> D[コントローラーメソッド実行]
     
     D --> E{リクエスト検証}
@@ -55,7 +56,8 @@ flowchart TD
     O --> P
     H --> P
     
-    P --> Q[クライアントへ応答]
+    P --> X[APIログミドルウェア]
+    X --> Q[クライアントへ応答]
     
     subgraph "LimitOffsetAware"
     I
@@ -74,6 +76,11 @@ flowchart TD
     V
     end
     
+    subgraph "APIログミドルウェア"
+    W
+    X
+    end
+    
     subgraph "JsonResponseFactory"
     M
     N
@@ -84,6 +91,140 @@ flowchart TD
 ```
 
 この図は、リクエストがルーターを通過し、ミドルウェア処理を経て、StubControllerから継承された機能を利用してAPIリクエストを処理する全体的な流れを示しています。各ステップでは、ベースコントローラーに組み込まれたトレイトの機能が活用されます。
+
+## ミドルウェア
+
+### APIログミドルウェア
+
+`app/Http/Middleware/ApiLogMiddleware.php`に位置し、すべてのAPIリクエストとレスポンスを自動的に記録します：
+
+```php
+<?php namespace W3\Http\Middleware;
+
+use Closure;
+use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpFoundation\Response;
+
+class ApiLogMiddleware
+{
+    /**
+     * リクエスト/レスポンスを処理し、ログを記録します
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  \Closure  $next
+     * @return mixed
+     */
+    public function handle($request, Closure $next)
+    {
+        // リクエストの開始時間
+        $startTime = microtime(true);
+        
+        // リクエストログ
+        $requestLog = [
+            'time' => date('Y-m-d H:i:s'),
+            'ip' => $request->ip(),
+            'method' => $request->method(),
+            'url' => $request->fullUrl(),
+            'user_agent' => $request->header('User-Agent'),
+            'headers' => $this->filterSensitiveHeaders($request->headers->all()),
+            'payload' => $this->filterSensitiveData($request->all())
+        ];
+        
+        // ユーザー情報があれば追加
+        if ($request->user()) {
+            $requestLog['user_id'] = $request->user()->id;
+        }
+        
+        // リクエストヘッダーからコンテキスト情報
+        $contextHeaders = ['x-unit-id', 'x-user-id', 'x-request-id', 'x-if-service'];
+        foreach ($contextHeaders as $header) {
+            if ($request->header($header)) {
+                $key = str_replace(['x-', '-'], ['', '_'], $header);
+                $requestLog[$key] = $request->header($header);
+            }
+        }
+        
+        // リクエストログを記録
+        Log::info('API Request', $requestLog);
+        
+        // レスポンスを処理
+        $response = $next($request);
+        
+        // 処理時間
+        $duration = microtime(true) - $startTime;
+        
+        // レスポンスログ
+        $responseLog = [
+            'duration' => round($duration * 1000, 2).'ms', // ミリ秒単位
+            'status' => $response->getStatusCode(),
+            'memory_usage' => round(memory_get_peak_usage(true) / 1024 / 1024, 2).'MB'
+        ];
+        
+        // JSONレスポンスの場合、データを記録
+        if ($response instanceof Response && $response->headers->get('Content-Type') === 'application/json') {
+            $content = json_decode($response->getContent(), true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                $responseLog['response'] = $this->filterSensitiveData($content);
+            }
+        }
+        
+        // レスポンスログを記録
+        Log::info('API Response', $responseLog);
+        
+        return $response;
+    }
+    
+    /**
+     * センシティブなヘッダー情報をフィルタリング
+     *
+     * @param array $headers
+     * @return array
+     */
+    private function filterSensitiveHeaders(array $headers)
+    {
+        $sensitiveHeaders = ['authorization', 'cookie'];
+        foreach ($sensitiveHeaders as $header) {
+            if (isset($headers[$header])) {
+                $headers[$header] = '[REDACTED]';
+            }
+        }
+        return $headers;
+    }
+    
+    /**
+     * センシティブなデータをフィルタリング
+     *
+     * @param array $data
+     * @return array
+     */
+    private function filterSensitiveData(array $data)
+    {
+        $sensitiveFields = ['password', 'password_confirmation', 'token', 'access_token', 'secret'];
+        foreach ($sensitiveFields as $field) {
+            if (isset($data[$field])) {
+                $data[$field] = '[REDACTED]';
+            }
+        }
+        return $data;
+    }
+}
+```
+
+### HTTP Kernelへの登録
+
+`app/Http/Kernel.php`のmiddlewareGroupsセクションに登録します：
+
+```php
+protected $middlewareGroups = [
+    'web' => [
+        // ...他のミドルウェア
+    ],
+    'api' => [
+        // ...他のミドルウェア
+        \W3\Http\Middleware\ApiLogMiddleware::class,
+    ],
+];
+```
 
 ## 主要コンポーネント
 
@@ -179,7 +320,115 @@ class ApiController extends StubController
 
 `app/Helpers/ExceptionHandler.php`に位置し、このトレイトは例外処理を一元的に管理するためのメソッドを提供します：
 
-- **handleException($e, $data = null)** - あらゆる種類の例外を処理し、適切なレスポンスを返す
+```php
+<?php namespace W3\Helpers;
+
+trait ExceptionHandler
+{
+    /**
+     * あらゆる種類の例外を処理し、適切なレスポンスを返す
+     * 例外情報を自動的にログに記録します
+     * 
+     * @param \Exception $e 処理する例外
+     * @param mixed $data 警告レスポンスで返すオプションデータ
+     * @return \Illuminate\Http\JsonResponse
+     */
+    protected function handleException(\Exception $e, $data = null)
+    {
+        // 例外の詳細情報を収集
+        $exceptionData = [
+            'exception_class' => get_class($e),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+            'trace' => $this->getSimplifiedTrace($e)
+        ];
+        
+        // リクエスト情報を収集
+        $requestData = [];
+        if (request()) {
+            $requestData = [
+                'url' => request()->fullUrl(),
+                'method' => request()->method(),
+                'ip' => request()->ip()
+            ];
+        }
+        
+        // コンテキスト情報をマージ
+        $context = array_merge($this->__logContext(), $exceptionData, $requestData);
+        
+        if ($this->isUserException($e)) {
+            // ユーザー例外はINFOレベルでログ
+            $this->log(LOG_INFO, $e->getCode(), $e->getMessage(), $context);
+            return $this->buildNG($e->getCode(), $e->getMessages());
+        } 
+        
+        if ($this->isProgrammerException($e)) {
+            // プログラマー例外はERRORレベルでログ
+            $this->log(LOG_ERR, $e->getCode(), $e->getMessage(), $context);
+            return $this->buildNG('SYS_ERR', ['システムエラーが発生しました']);
+        } 
+        
+        if ($this->isWarnException($e)) {
+            // 警告例外はWARNINGレベルでログ
+            $this->log(LOG_WARNING, $e->getCode(), $e->getMessage(), $context);
+            return $this->buildWarn($e->getCode(), $e->getMessages(), $data);
+        } 
+        
+        if ($this->isValidationException($e)) {
+            // バリデーション例外はINFOレベルでログ
+            $validationErrors = $e->validator->errors()->toArray();
+            $this->log(LOG_INFO, 'VALIDATION_ERR', json_encode($validationErrors), $context);
+            return $this->buildNGValidation($validationErrors);
+        }
+        
+        if ($this->isDeadlockExcpetion($e)) {
+            // デッドロック例外はERRORレベルでログ
+            $this->log(LOG_ERR, 'DEADLOCK', $e->getMessage(), $context);
+            return $this->buildNG('DB_ERR', ['データベース競合が発生しました。再試行してください。']);
+        }
+        
+        // 未知の例外はCRITICALレベルでログ
+        $this->log(LOG_CRIT, 'UNKNOWN', $e->getMessage(), $context);
+        
+        // 開発環境ではより詳細な情報を返す
+        if (config('app.debug')) {
+            return $this->buildNG('SYS_ERR', [
+                '予期しないエラーが発生しました',
+                'エラーメッセージ: ' . $e->getMessage(),
+                'ファイル: ' . $e->getFile() . ':' . $e->getLine()
+            ]);
+        }
+        
+        return $this->buildNG('SYS_ERR', ['予期しないエラーが発生しました']);
+    }
+    
+    /**
+     * スタックトレースを簡略化
+     *
+     * @param \Exception $e
+     * @return array
+     */
+    private function getSimplifiedTrace(\Exception $e)
+    {
+        $trace = $e->getTrace();
+        $simplified = [];
+        
+        // 最初の10フレームのみを取得
+        $frames = array_slice($trace, 0, 10);
+        
+        foreach ($frames as $frame) {
+            $simplified[] = [
+                'file' => isset($frame['file']) ? $frame['file'] : '[internal]',
+                'line' => isset($frame['line']) ? $frame['line'] : '0',
+                'function' => isset($frame['function']) ? $frame['function'] : '',
+                'class' => isset($frame['class']) ? $frame['class'] : ''
+            ];
+        }
+        
+        return $simplified;
+    }
+}
+```
 
 ## エラー処理
 
@@ -269,6 +518,7 @@ ExceptionHandlerトレイトを使用することで、ビジネスロジック�
    - コードの重複を防止
    - 一貫した例外処理パターンの適用
    - コントローラーアクションがシンプルで読みやすくなる
+   - すべての例外が自動的にログに記録される
 
 3. **実装方法**:
    - `app/Helpers/ExceptionHandler.php`トレイトを作成
